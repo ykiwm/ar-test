@@ -5,55 +5,79 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AR Test</title>
 
-    <!-- A-Frame: 3Dを描くライブラリ -->
-    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <!-- A-Frame 1.2.0: AR.jsとの互換性が確認されている安定バージョン -->
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
 
-    <!-- AR.js: カメラでマーカーを認識するライブラリ（バージョン固定で安定版を使う） -->
-    <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.5/aframe/build/aframe-ar.js"></script>
+    <!-- AR.js 3.4.0: 安定バージョン -->
+    <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.0/aframe/build/aframe-ar.js"></script>
 
     <style>
       body {
         margin: 0;
         overflow: hidden;
       }
+
+      /* エラーを画面上部に赤く表示するデバッグ用パネル */
+      #debug {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        background: rgba(200, 0, 0, 0.85);
+        color: white;
+        padding: 12px;
+        font-size: 13px;
+        font-family: monospace;
+        z-index: 9999;
+        display: none;
+        word-break: break-all;
+      }
     </style>
   </head>
 
   <body>
-    <!--
-      a-scene: AR の舞台全体
-      embedded: 画面全体に広げる
-      arjs: AR.js を有効にする
-        sourceType: webcam → カメラ映像を使う
-        facingMode: environment → 背面カメラ（アウトカメラ）を使う
-        debugUIEnabled: false → デバッグ用UIを非表示
-      vr-mode-ui: VRボタンを非表示（スマホでは不要）
-    -->
+    <!-- エラー発生時にここにメッセージが表示される -->
+    <div id="debug"></div>
+
     <a-scene
       embedded
-      arjs="sourceType: webcam; facingMode: environment; debugUIEnabled: false;"
+      arjs="sourceType: webcam; debugUIEnabled: false;"
       vr-mode-ui="enabled: false"
     >
 
-      <!--
-        a-marker: 「Hiroマーカーが見えたら...」という条件
-        preset="hiro": 標準マーカー「Hiro」を使う
-      -->
       <a-marker preset="hiro">
-
-        <!-- マーカーの上に黄色いボックスを表示する -->
-        <!-- position="0 0.5 0": 高さ0.5の位置（マーカーの真上）に置く -->
-        <a-box
-          position="0 0.5 0"
-          color="yellow"
-          scale="1 1 1"
-        ></a-box>
-
+        <a-box position="0 0.5 0" color="yellow"></a-box>
       </a-marker>
 
-      <!-- カメラ -->
       <a-entity camera></a-entity>
 
     </a-scene>
+
+    <script>
+      // エラーをキャッチして画面に表示する（スマホでのデバッグ用）
+      function showDebug(msg) {
+        var el = document.getElementById('debug');
+        el.style.display = 'block';
+        el.textContent = msg;
+      }
+
+      window.addEventListener('error', function (e) {
+        showDebug('JS Error: ' + e.message + '\n' + e.filename + ':' + e.lineno);
+      });
+
+      window.addEventListener('unhandledrejection', function (e) {
+        showDebug('Promise Error: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)));
+      });
+
+      // カメラアクセスを自分で試して、エラー内容を表示する
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+        .then(function (stream) {
+          stream.getTracks().forEach(function (t) { t.stop(); });
+          // カメラアクセス成功 → デバッグパネルは出さない
+        })
+        .catch(function (err) {
+          showDebug('Camera Error\nName: ' + err.name + '\nMessage: ' + err.message);
+        });
+    </script>
   </body>
 </html>
