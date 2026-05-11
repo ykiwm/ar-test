@@ -5,30 +5,140 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AR Test</title>
 
-    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
-    <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.0/aframe/build/aframe-ar.js"></script>
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.5/aframe/build/aframe-ar.js"></script>
 
     <style>
       body {
         margin: 0;
         overflow: hidden;
       }
+      #debug-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        background: rgba(0, 0, 0, 0.75);
+        color: #0f0;
+        padding: 8px 12px;
+        font-family: monospace;
+        font-size: 12px;
+        z-index: 9999;
+        max-height: 50vh;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        line-height: 1.4;
+        pointer-events: none;
+      }
+      #debug-overlay.has-error {
+        color: #f66;
+        pointer-events: auto;
+      }
+      #debug-toggle {
+        position: fixed;
+        top: 4px;
+        right: 4px;
+        z-index: 10000;
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        border: 1px solid #888;
+        padding: 4px 8px;
+        font-size: 11px;
+        font-family: monospace;
+      }
     </style>
   </head>
 
   <body>
+    <button id="debug-toggle">debug</button>
+    <div id="debug-overlay">initializing...</div>
+
+    <script>
+      const dbg = document.getElementById('debug-overlay');
+      const toggle = document.getElementById('debug-toggle');
+      const lines = [];
+
+      function log(msg, isError) {
+        const t = new Date().toLocaleTimeString();
+        lines.push('[' + t + '] ' + msg);
+        dbg.textContent = lines.join('\n');
+        if (isError) dbg.classList.add('has-error');
+        console.log('[AR]', msg);
+      }
+
+      toggle.addEventListener('click', () => {
+        dbg.style.display = dbg.style.display === 'none' ? '' : 'none';
+      });
+
+      log('UA: ' + navigator.userAgent);
+      log('secure context: ' + window.isSecureContext);
+      log('protocol: ' + location.protocol);
+      log('mediaDevices: ' + !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+
+      // Pre-flight: enumerate cameras and try opening environment camera
+      (async () => {
+        try {
+          if (!navigator.mediaDevices) {
+            log('ERROR: navigator.mediaDevices is undefined', true);
+            return;
+          }
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const cams = devices.filter((d) => d.kind === 'videoinput');
+          log('video inputs found: ' + cams.length);
+          cams.forEach((c, i) => {
+            log('  [' + i + '] label="' + (c.label || '(empty until permission granted)') + '"');
+          });
+
+          try {
+            const s = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: 'environment' },
+              audio: false,
+            });
+            const track = s.getVideoTracks()[0];
+            const settings = track ? track.getSettings() : {};
+            log('OK: environment camera opened');
+            log('  -> ' + JSON.stringify(settings));
+            s.getTracks().forEach((t) => t.stop());
+          } catch (e) {
+            log('env-camera ERROR: ' + e.name + ': ' + e.message, true);
+            // Fallback: try any camera
+            try {
+              const s2 = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+              log('fallback any-camera OK');
+              s2.getTracks().forEach((t) => t.stop());
+            } catch (e2) {
+              log('fallback ERROR: ' + e2.name + ': ' + e2.message, true);
+            }
+          }
+        } catch (e) {
+          log('enumerateDevices ERROR: ' + e.name + ': ' + e.message, true);
+        }
+      })();
+
+      window.addEventListener('error', (e) => {
+        log('window.error: ' + (e.message || e.error), true);
+      });
+      window.addEventListener('unhandledrejection', (e) => {
+        log('promise rejection: ' + (e.reason && e.reason.message ? e.reason.message : e.reason), true);
+      });
+      window.addEventListener('arjs-video-loaded', () => log('AR.js: arjs-video-loaded'));
+      window.addEventListener('camera-init', () => log('AR.js: camera-init'));
+      window.addEventListener('camera-error', (e) => {
+        log('AR.js: camera-error ' + JSON.stringify(e.detail || {}), true);
+      });
+    </script>
+
     <a-scene
       embedded
       arjs="sourceType: webcam; debugUIEnabled: false;"
       vr-mode-ui="enabled: false"
+      renderer="logarithmicDepthBuffer: true; antialias: true;"
     >
-
       <a-marker preset="hiro">
         <a-box position="0 0.5 0" color="yellow"></a-box>
       </a-marker>
 
       <a-entity camera></a-entity>
-
     </a-scene>
   </body>
 </html>
