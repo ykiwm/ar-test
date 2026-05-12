@@ -6,21 +6,103 @@
     <title>AR Test</title>
 
     <script>
-      // getUserMedia shim: relaxes overly-strict constraints (facingMode: 'environment'
-      // with specific resolution) that NotReadableError on some Android Chrome devices.
+      // getUserMedia shim for multi-back-camera Android phones where
+      // facingMode:'environment' returns NotReadableError. Falls back to
+      // probing each back camera by deviceId, then to {video:true}.
+      // Also swaps a front-camera result for a back-camera if possible.
       // Must run BEFORE AR.js loads so AR.js's internal call also benefits.
       (function () {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
         var orig = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        var origEnum = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
+        window.__gumShim = { used: null, opened: null, swapped: null };
+
+        function isBackLabel(label) {
+          return /back|rear|environment/i.test(label || '');
+        }
+        function isFrontLabel(label) {
+          return /front|user|self/i.test(label || '');
+        }
+
+        async function trySwapToBack(stream) {
+          var tracks = stream.getVideoTracks();
+          if (!tracks.length) return stream;
+          var track = tracks[0];
+          var label = track.label || '';
+          var settings = track.getSettings ? track.getSettings() : {};
+          if (isBackLabel(label) || settings.facingMode === 'environment') return stream;
+          if (!isFrontLabel(label) && settings.facingMode !== 'user') return stream;
+          try {
+            var devs = await origEnum();
+            var backCams = devs.filter(function (d) {
+              return d.kind === 'videoinput' && isBackLabel(d.label);
+            });
+            for (var i = 0; i < backCams.length; i++) {
+              try {
+                var newS = await orig({
+                  audio: false,
+                  video: { deviceId: { exact: backCams[i].deviceId } },
+                });
+                stream.getTracks().forEach(function (t) { t.stop(); });
+                window.__gumShim.swapped = backCams[i].label;
+                console.warn('[gUM-shim] swapped front->back: ' + backCams[i].label);
+                return newS;
+              } catch (e) {
+                console.warn('[gUM-shim] back-swap ' + backCams[i].label + ': ' + e.name);
+              }
+            }
+          } catch (e) {
+            console.warn('[gUM-shim] enum-for-swap failed: ' + e.name);
+          }
+          return stream;
+        }
+
         navigator.mediaDevices.getUserMedia = function (constraints) {
-          return orig(constraints).catch(function (err) {
-            var relaxableErrors = ['NotReadableError', 'NotFoundError', 'OverconstrainedError'];
-            if (relaxableErrors.indexOf(err.name) === -1) throw err;
-            console.warn('[gUM-shim] ' + err.name + ' on strict constraints, retrying with {video:true}');
-            window.__gumShimUsed = err.name;
-            var relaxed = { audio: false, video: true };
-            if (constraints && constraints.audio) relaxed.audio = constraints.audio;
-            return orig(relaxed);
+          var wantedEnv = !!(
+            constraints && constraints.video &&
+            (constraints.video.facingMode === 'environment' ||
+             (constraints.video.facingMode && constraints.video.facingMode.ideal === 'environment') ||
+             (constraints.video.facingMode && constraints.video.facingMode.exact === 'environment'))
+          );
+          return orig(constraints).then(function (stream) {
+            window.__gumShim.opened = (stream.getVideoTracks()[0] || {}).label || '(unknown)';
+            return wantedEnv ? trySwapToBack(stream) : stream;
+          }).catch(async function (err) {
+            var relaxable = ['NotReadableError', 'NotFoundError', 'OverconstrainedError'];
+            if (relaxable.indexOf(err.name) === -1) throw err;
+            window.__gumShim.used = err.name;
+            console.warn('[gUM-shim] ' + err.name + ' on strict constraints');
+
+            try {
+              var devs = await origEnum();
+              var cams = devs.filter(function (d) { return d.kind === 'videoinput'; });
+              var backCams = cams.filter(function (c) { return isBackLabel(c.label); });
+              var candidates = backCams.length ? backCams : cams.filter(function (c) {
+                return !isFrontLabel(c.label);
+              });
+              if (!candidates.length) candidates = cams;
+              for (var i = 0; i < candidates.length; i++) {
+                try {
+                  var stream = await orig({
+                    audio: false,
+                    video: { deviceId: { exact: candidates[i].deviceId } },
+                  });
+                  window.__gumShim.used = err.name + ' -> deviceId';
+                  window.__gumShim.opened = candidates[i].label;
+                  console.warn('[gUM-shim] opened by deviceId: ' + candidates[i].label);
+                  return stream;
+                } catch (e) {
+                  console.warn('[gUM-shim] tried ' + candidates[i].label + ': ' + e.name);
+                }
+              }
+            } catch (e) {
+              console.warn('[gUM-shim] enumerate failed: ' + e.name);
+            }
+
+            window.__gumShim.used = err.name + ' -> video:true';
+            var s = await orig({ audio: false, video: true });
+            window.__gumShim.opened = (s.getVideoTracks()[0] || {}).label || '(unknown)';
+            return await trySwapToBack(s);
           });
         };
       })();
@@ -114,7 +196,11 @@
             });
             const track = s.getVideoTracks()[0];
             const settings = track ? track.getSettings() : {};
-            log('OK: gUM opened (shim used? ' + (window.__gumShimUsed || 'no') + ')');
+            const shim = window.__gumShim || {};
+            log('OK: gUM opened');
+            log('  shim used: ' + (shim.used || 'no'));
+            log('  shim opened: ' + (shim.opened || '(n/a)'));
+            log('  shim swapped: ' + (shim.swapped || 'no'));
             log('  track label: ' + (track && track.label ? track.label : '(none)'));
             log('  settings: ' + JSON.stringify(settings));
             s.getTracks().forEach((t) => t.stop());
