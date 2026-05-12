@@ -233,17 +233,54 @@
       });
     </script>
 
+    <div id="marker-status" style="
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-family: monospace;
+      font-size: 16px;
+      z-index: 9999;
+      pointer-events: none;
+      text-align: center;
+    ">マーカーを探しています...</div>
+
     <a-scene
       embedded
       arjs="sourceType: webcam; debugUIEnabled: false;"
       vr-mode-ui="enabled: false"
       renderer="logarithmicDepthBuffer: true; antialias: true;"
     >
-      <a-marker preset="hiro">
-        <a-box position="0 0.5 0" color="yellow"></a-box>
+      <a-marker preset="hiro" id="hiro-marker">
+        <a-box position="0 0.5 0" color="yellow" animation="property: rotation; to: 0 360 0; loop: true; dur: 2000; easing: linear"></a-box>
+        <a-text value="Hiro!" position="0 1.2 0" align="center" color="white" scale="2 2 2"></a-text>
       </a-marker>
 
       <a-entity camera></a-entity>
     </a-scene>
+
+    <script>
+      const markerStatus = document.getElementById('marker-status');
+
+      document.addEventListener('DOMContentLoaded', () => {
+        const marker = document.getElementById('hiro-marker');
+        if (marker) {
+          marker.addEventListener('markerFound', () => {
+            log('Hiro marker FOUND!');
+            markerStatus.textContent = '✓ Hiroマーカー検出中！';
+            markerStatus.style.background = 'rgba(0,180,0,0.8)';
+          });
+          marker.addEventListener('markerLost', () => {
+            log('Hiro marker LOST');
+            markerStatus.textContent = 'マーカーを探しています...';
+            markerStatus.style.background = 'rgba(0,0,0,0.7)';
+          });
+        }
+      });
+    </script>
   </body>
 </html>
